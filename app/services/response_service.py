@@ -1,4 +1,5 @@
 import math
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, HTTPException
 import requests
 import joblib
@@ -18,6 +19,10 @@ from typing import Any, TypedDict, cast, Literal, TypeAlias
 
 
 router = APIRouter()
+
+# Shared pool for independent outbound HTTP calls (route handlers are sync and
+# already run in FastAPI's threadpool; this fans out *within* one request).
+_io_pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="upstream")
 
 MODEL_DIR = extract_locations.extract()
 health_model = joblib.load(os.path.join(MODEL_DIR, "health_risk_model.pkl"))
@@ -42,26 +47,31 @@ class ResponseService:
         }
 
         try:
-            current_response = requests.get(
-                OPENWEATHER_CURRENT_AIR_URL,
-                params=params,
-                timeout=10,
+            # The four upstream calls are independent, so run them concurrently:
+            # latency becomes max(call) instead of sum(calls).
+            current_f = _io_pool.submit(
+                requests.get, OPENWEATHER_CURRENT_AIR_URL, params=params, timeout=10
             )
-            forecast_response = requests.get(
-                OPENWEATHER_FORECAST_AIR_URL,
-                params=params,
-                timeout=10,
+            forecast_f = _io_pool.submit(
+                requests.get, OPENWEATHER_FORECAST_AIR_URL, params=params, timeout=10
             )
-            weather_response = requests.get(
+            weather_f = _io_pool.submit(
+                requests.get,
                 OPENWEATHER_CURRENT_WEATHER_URL,
                 params={**params, "units": "metric"},
                 timeout=10,
             )
-            geocode_response = requests.get(
+            geocode_f = _io_pool.submit(
+                requests.get,
                 OPENWEATHER_REVERSE_GEO_URL,
                 params={**params, "limit": 1},
                 timeout=10,
             )
+            # .result() re-raises RequestException, handled by the except below.
+            current_response = current_f.result()
+            forecast_response = forecast_f.result()
+            weather_response = weather_f.result()
+            geocode_response = geocode_f.result()
 
             if current_response.status_code != 200:
                 return {
@@ -898,13 +908,18 @@ class ResponseService:
             return None
 
     def compare_locations(self, location1: str, location2: str, pm25_1: float | None = None, pm10_1: float | None = None, pm25_2: float | None = None, pm10_2: float | None = None):
-        if None in (pm25_1, pm10_1):
-            found = self._live_pm_for_place(location1)
+        # Look up both places concurrently (each is geocode -> air quality).
+        need1 = None in (pm25_1, pm10_1)
+        need2 = None in (pm25_2, pm10_2)
+        f1 = _io_pool.submit(self._live_pm_for_place, location1) if need1 else None
+        f2 = _io_pool.submit(self._live_pm_for_place, location2) if need2 else None
+        if f1 is not None:
+            found = f1.result()
             if found is None:
                 return {"error": f"Could not find live air-quality data for '{location1}'"}
             location1, pm25_1, pm10_1 = found
-        if None in (pm25_2, pm10_2):
-            found = self._live_pm_for_place(location2)
+        if f2 is not None:
+            found = f2.result()
             if found is None:
                 return {"error": f"Could not find live air-quality data for '{location2}'"}
             location2, pm25_2, pm10_2 = found
