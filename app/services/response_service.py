@@ -870,7 +870,44 @@ class ResponseService:
             return {"error": f"Failed to generate citizen actions: {error}"}
 
 
-    def compare_locations(self, location1: str, location2: str, pm25_1: float, pm10_1: float, pm25_2: float, pm10_2: float):
+    def _live_pm_for_place(self, name: str) -> tuple[str, float, float] | None:
+        """Geocode a place name and return (display name, pm2.5, pm10), or None."""
+        # Direct geocoding lives next to reverse geocoding; derive its URL so no
+        # new env var is required.
+        direct_url = OPENWEATHER_REVERSE_GEO_URL.replace("/reverse", "/direct")
+        try:
+            geo = requests.get(
+                direct_url,
+                params={"q": name, "limit": 1, "appid": OPENWEATHER_API_KEY},
+                timeout=10,
+            )
+            if geo.status_code != 200 or not geo.json():
+                return None
+            place = geo.json()[0]
+            air = requests.get(
+                OPENWEATHER_CURRENT_AIR_URL,
+                params={"lat": place["lat"], "lon": place["lon"], "appid": OPENWEATHER_API_KEY},
+                timeout=10,
+            )
+            if air.status_code != 200 or not air.json().get("list"):
+                return None
+            comp = air.json()["list"][0]["components"]
+            label = ", ".join(p for p in [place.get("name"), place.get("state"), place.get("country")] if p)
+            return label, float(comp.get("pm2_5", 0)), float(comp.get("pm10", 0))
+        except (requests.RequestException, KeyError, TypeError, ValueError):
+            return None
+
+    def compare_locations(self, location1: str, location2: str, pm25_1: float | None = None, pm10_1: float | None = None, pm25_2: float | None = None, pm10_2: float | None = None):
+        if None in (pm25_1, pm10_1):
+            found = self._live_pm_for_place(location1)
+            if found is None:
+                return {"error": f"Could not find live air-quality data for '{location1}'"}
+            location1, pm25_1, pm10_1 = found
+        if None in (pm25_2, pm10_2):
+            found = self._live_pm_for_place(location2)
+            if found is None:
+                return {"error": f"Could not find live air-quality data for '{location2}'"}
+            location2, pm25_2, pm10_2 = found
         prompt = f"""
     You are Clarity.
     Compare pollution health impact between:

@@ -39,10 +39,11 @@ class PredictPolicyRequest(PollutionBaseModel):
 class CompareLocationsRequest(BaseModel):
     location1: str
     location2: str
-    pm25_1: float
-    pm10_1: float
-    pm25_2: float
-    pm10_2: float
+    # Optional: when omitted, the backend geocodes the names and fetches live values.
+    pm25_1: float | None = None
+    pm10_1: float | None = None
+    pm25_2: float | None = None
+    pm10_2: float | None = None
 
 class HealthRisksRequest(PollutionBaseModel):
     pass
