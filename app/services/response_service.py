@@ -9,6 +9,7 @@ from app.models.datamodel1 import HealthRiskRequest, RegionClassRequest, Industr
 from app.services import extract_locations  # Fixed import path
 from app.config import API_KEY_GEMINI, OPENWEATHER_API_KEY, OPENWEATHER_CURRENT_AIR_URL, OPENWEATHER_CURRENT_WEATHER_URL, OPENWEATHER_FORECAST_AIR_URL, OPENWEATHER_REVERSE_GEO_URL
 from ml_models.ai_logic import ask_gemini
+from app.services import cache
 from ml_models.utils import calculate_overall_aqi as calc
 from datetime import datetime, timedelta
 import random
@@ -35,11 +36,33 @@ class ResponseService:
         router.add_api_route("/get_location", self.get_location, methods=["GET"])
         router.add_api_route("/get_trends", self.get_trends, methods=["GET"])
 
-        self._current_data = None
-        self._last_forecast = None
+    def _get_conditions(self, lat: float, lon: float) -> dict[str, Any]:
+        """Cached {"response", "forecast"} for a location.
+
+        Keyed on coordinates rounded to ~1 km so the dashboard and trends calls
+        (and nearby users) share one set of upstream calls. Errors are not cached.
+        The forecast lives in the cached value, not on the shared service
+        instance, so concurrent users cannot overwrite each other's data.
+        """
+        def compute() -> dict[str, Any]:
+            forecast: dict[str, Any] = {}
+            response = self._fetch_location(lat, lon, forecast)
+            return {"response": response, "forecast": forecast}
+
+        return cache.get_or_compute(
+            f"conditions:{lat:.2f}:{lon:.2f}",
+            compute,
+            should_cache=lambda v: "error" not in v["response"],
+        )
 
     def get_location(self, lat: float, lon: float) -> dict[str, Any]:
-        """Fetch current air pollution and forecast for supplied coordinates."""
+        """Current air pollution, weather and place name for coordinates (cached)."""
+        return self._get_conditions(lat, lon)["response"]
+
+    def _fetch_location(
+        self, lat: float, lon: float, forecast_out: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Call OpenWeather (uncached). Fills `forecast_out` with daily forecast."""
         params = {
             "lat": lat,
             "lon": lon,
@@ -141,7 +164,7 @@ class ResponseService:
                     if value is not None:
                         daily_values[date][pollutant].append(float(value))
 
-            self._last_forecast = {
+            forecast_out.update({
                 pollutant: [
                     {
                         "day": date,
@@ -154,9 +177,7 @@ class ResponseService:
                     if values[pollutant]
                 ]
                 for pollutant in pollutant_map
-            }
-
-            self._current_data = current_data
+            })
 
             city = f"{lat:.4f}, {lon:.4f}"
 
@@ -225,27 +246,28 @@ class ResponseService:
         if range not in ["weekly", "monthly", "yearly"]:
             return {"error": "Invalid range. Use 'weekly', 'monthly', or 'yearly'"}
 
-        location_data = self.get_location(lat, lon)
-        if 'error' in location_data:
-            return location_data
+        conditions = self._get_conditions(lat, lon)
+        if 'error' in conditions["response"]:
+            return conditions["response"]
+        forecast = conditions["forecast"]
 
         if range == "weekly":
-            return self._get_weekly_data()
+            return self._get_weekly_data(forecast)
         elif range == "monthly":
-            return self._get_monthly_data()
+            return self._get_monthly_data(forecast)
         else:
-            return self._get_yearly_data()
+            return self._get_yearly_data(forecast)
 
-    def _get_weekly_data(self) -> dict[str, Any]:
+    def _get_weekly_data(self, forecast: dict[str, Any]) -> dict[str, Any]:
         """Return available daily averages from the OpenWeather forecast."""
-        if not self._last_forecast:
+        if not forecast:
             return {"error": "No forecast data available"}
 
         pollutants = ["pm25", "pm10", "no2", "co", "o3"]
         data_by_date: dict[str, dict[str, str | float | None]] = {}
 
         for pollutant in pollutants:
-            for forecast_day in self._last_forecast.get(pollutant, []):
+            for forecast_day in forecast.get(pollutant, []):
                 date = str(forecast_day["day"])
 
                 data_by_date.setdefault(date, {"date": date})
@@ -271,16 +293,16 @@ class ResponseService:
                 "for up to four days."
             ),
         }
-    def _get_monthly_data(self):
+    def _get_monthly_data(self, forecast: dict[str, Any]):
         """Monthly averages for all pollutants."""
-        if not self._last_forecast:
+        if not forecast:
             return {"error": "No forecast data available"}
 
         current_month_data: dict[str, dict[str, list[float]]] = {}
         pollutants = ["pm25", "pm10", "no2", "co", "o3"]
 
         for pol in pollutants:
-            for day in self._last_forecast.get(pol, []):
+            for day in forecast.get(pol, []):
                 month = str(day["day"])[:7]
                 current_month_data.setdefault(month, {}).setdefault(pol, []).append(
                     float(day["avg"])
@@ -351,9 +373,9 @@ class ResponseService:
         from typing import Any
 
 
-    def _get_yearly_data(self) -> dict[str, Any]:
+    def _get_yearly_data(self, forecast: dict[str, Any]) -> dict[str, Any]:
         """Yearly averages for all pollutants."""
-        monthly_data = self._get_monthly_data()
+        monthly_data = self._get_monthly_data(forecast)
 
         if "error" in monthly_data:
             return monthly_data
@@ -437,7 +459,7 @@ class ResponseService:
             "temperature": 0.7
         }
 
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=15)
 
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"].strip()
