@@ -1,0 +1,9 @@
+# Local Redis for the response cache.
+#   docker compose up -d redis
+#   export REDIS_URL=redis://localhost:6379/0     (or put it in .env)
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]

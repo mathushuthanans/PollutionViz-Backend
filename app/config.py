@@ -7,6 +7,10 @@ if os.getenv("ENV") != "production":
 
 
 API_KEY_GEMINI: str = os.getenv("API_KEY_GEMINI", "")
+
+# Optional: when REDIS_URL is unset the cache falls back to in-process memory.
+REDIS_URL: str = os.getenv("REDIS_URL", "")
+CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "600"))
 MODEL: str = os.getenv("MODEL", "")
 OPENWEATHER_API_KEY: str = os.getenv("OPENWEATHER_API_KEY", "")
 OPENWEATHER_CURRENT_AIR_URL: str = os.getenv("OPENWEATHER_CURRENT_AIR_URL", "")

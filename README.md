@@ -121,3 +121,17 @@ PollutionViz-Backend/
 ├── setup.py
 └── .gitignore
 
+
+## Caching (Redis)
+
+Upstream OpenWeather data (current air, forecast, weather, place name) is cached
+per ~1 km cell for `CACHE_TTL_SECONDS` (default 600). The dashboard and trends
+endpoints share one cached fetch.
+
+- **With Redis:** set `REDIS_URL` (e.g. `redis://localhost:6379/0`). Locally,
+  `docker compose up -d redis`. On Render, `render.yaml` provisions a `keyvalue`
+  instance and injects `REDIS_URL` automatically.
+- **Without Redis:** leave `REDIS_URL` unset; an in-process cache is used. If Redis
+  is configured but unreachable, the app logs a warning and falls back to memory.
+- **Check which is active:** `GET /cache_status` →
+  `{"backend": "redis", "reachable": true, "ttl_seconds": 600}`.

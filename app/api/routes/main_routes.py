@@ -7,6 +7,7 @@ from app.models.datamodel1 import (
     ReducePollutionPlanRequest
 )
 from app.services.response_service import response_service
+from app.services import cache
 
 
 
@@ -22,6 +23,11 @@ app.add_middleware(
 )
 router = APIRouter()
 
+
+
+@router.get("/cache_status")
+def cache_status():
+    return cache.status()
 
 
 # === Dashboard Routes ===

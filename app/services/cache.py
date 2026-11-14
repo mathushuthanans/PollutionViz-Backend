@@ -9,24 +9,30 @@
 process: if two requests miss the same key at once, only one computes.
 """
 import json
-import os
+import logging
 import threading
 import time
 from typing import Any, Callable
 
-CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
+from app.config import CACHE_TTL_SECONDS, REDIS_URL
+
+log = logging.getLogger("uvicorn.error")
 
 _redis = None
-_redis_url = os.getenv("REDIS_URL", "")
-if _redis_url:
+if REDIS_URL:
     try:
         import redis  # type: ignore
 
         _redis = redis.Redis.from_url(
-            _redis_url, socket_connect_timeout=1, socket_timeout=1
+            REDIS_URL, socket_connect_timeout=1, socket_timeout=1
         )
-    except Exception:  # package missing or bad URL -> fall back to memory
+        _redis.ping()
+        log.info("Cache backend: Redis")
+    except Exception as exc:  # package missing, bad URL, or server down
+        log.warning("REDIS_URL set but Redis unavailable (%s); using in-memory cache", exc)
         _redis = None
+else:
+    log.info("Cache backend: in-memory (REDIS_URL not set)")
 
 _mem: dict[str, tuple[float, str]] = {}
 _mem_lock = threading.Lock()
@@ -79,6 +85,18 @@ def get_or_compute(
         if should_cache(value):
             _set(key, value, ttl)
         return value
+
+
+def status() -> dict[str, Any]:
+    """Which backend is active and whether Redis is currently reachable."""
+    if _redis is None:
+        return {"backend": "memory", "ttl_seconds": CACHE_TTL_SECONDS}
+    try:
+        _redis.ping()
+        reachable = True
+    except Exception:
+        reachable = False
+    return {"backend": "redis", "reachable": reachable, "ttl_seconds": CACHE_TTL_SECONDS}
 
 
 def clear() -> None:

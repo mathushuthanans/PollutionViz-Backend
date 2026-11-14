@@ -1,4 +1,10 @@
 services:
+  - type: keyvalue          # Redis-compatible cache for upstream API responses
+    name: pollutionviz-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []         # internal connections only
+
   - type: web
     name: pollutionviz
     runtime: python
@@ -7,6 +13,11 @@ services:
     envVars:
     - key: ENV
       value: production
+    - key: REDIS_URL
+      fromService:
+        type: keyvalue
+        name: pollutionviz-redis
+        property: connectionString
     - key: API_URL_WAQI
       value: https://api.waqi.info/feed/geo:21.1199;79.0196/?token=95436f0dbd6f640af4ac23fc61c4352e6af45f8e
     - key: API_KEY_GROQ
