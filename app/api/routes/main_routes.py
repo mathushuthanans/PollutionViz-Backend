@@ -1,26 +1,22 @@
-from fastapi import FastAPI, APIRouter
-from fastapi.middleware.cors import CORSMiddleware
+from typing import Annotated
+
+from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse
 from app.models.datamodel1 import HealthRiskRequest, RegionClassRequest
 from app.models.datamodel1 import (
+    PolicyAnalysisResponse, PolicyErrorBody,
     PredictPolicyRequest, CompareLocationsRequest, HealthRisksRequest,
     SuggestPoliciesRequest, CitizenActionsRequest, MythBusterRequest,
     ReducePollutionPlanRequest
 )
 from app.services.response_service import response_service
+from app.errors import UnknownStateError
+from app.services.policy_impact import PolicyModelError
 from app.services import cache
 
 
 
 
-app = FastAPI()
-# Explicitly allow the origin where your HTML is served
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # or specify frontend URL
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 router = APIRouter()
 
 
@@ -89,22 +85,49 @@ def help_info():
 def explain_pollution(pollutant: str):
     return response_service.explain_pollution(pollutant)
 
-@router.post("/predict_policy")
-def predict_policy_post(request: PredictPolicyRequest):
-    return response_service.predict_policy(
-        request.policy, request.location, request.pm25, request.pm10,
-        request.no2, request.co, request.o3
-    )
+_POLICY_RESPONSES = {
+    502: {
+        "model": PolicyErrorBody,
+        "description": "The model failed or returned an invalid reply twice.",
+    },
+    422: {"description": "The location is not a known state or union territory."},
+}
 
-@router.get("/predict_policy")
-def predict_policy_get(
-    policy: str, location: str,
-    pm25: float, pm10: float,
-    no2: float, co: float, o3: float
-):
-    return response_service.predict_policy(
-        policy, location, pm25, pm10, no2, co, o3
-    )
+
+def _analyse(request: PredictPolicyRequest):
+    try:
+        return response_service.predict_policy(
+            request.policy, request.location, request.pm25, request.pm10,
+            request.no2, request.co, request.o3
+        )
+    except UnknownStateError as error:
+        return JSONResponse(
+            status_code=422,
+            content={"error_class": "unknown_state", "detail": str(error)},
+        )
+    except PolicyModelError as error:
+        return JSONResponse(
+            status_code=502,
+            content={"error_class": error.error_class, "detail": error.detail},
+        )
+
+
+@router.post(
+    "/predict_policy",
+    response_model=PolicyAnalysisResponse,
+    responses=_POLICY_RESPONSES,
+)
+def predict_policy_post(request: PredictPolicyRequest):
+    return _analyse(request)
+
+
+@router.get(
+    "/predict_policy",
+    response_model=PolicyAnalysisResponse,
+    responses=_POLICY_RESPONSES,
+)
+def predict_policy_get(request: Annotated[PredictPolicyRequest, Query()]):
+    return _analyse(request)
 
 
 @router.post("/compare_locations")

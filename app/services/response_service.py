@@ -6,6 +6,8 @@ import joblib
 import numpy as np
 import os
 from app.models.datamodel1 import HealthRiskRequest, RegionClassRequest, IndustrialZone
+from app.models.datamodel1 import PolicyAnalysisResponse, PredictPolicyRequest
+from app.services.policy_impact import analyse_policy
 from app.services import extract_locations  # Fixed import path
 from app.config import API_KEY_GEMINI, OPENWEATHER_API_KEY, OPENWEATHER_CURRENT_AIR_URL, OPENWEATHER_CURRENT_WEATHER_URL, OPENWEATHER_FORECAST_AIR_URL, OPENWEATHER_REVERSE_GEO_URL
 from ml_models.ai_logic import ask_gemini
@@ -1204,36 +1206,16 @@ class ResponseService:
             no2: float,
             co: float,
             o3: float,
-        ) -> Any:
-            current_aqi = calc(pm25, pm10, no2, co, o3)
+        ) -> PolicyAnalysisResponse:
+            """Estimated impact of a policy. Raises PolicyModelError on failure.
 
-            prompt = f"""
-        You are Clarity, an AI assistant for pollution-policy analysis.
-
-        Policy: {policy}
-        Location: {location}
-        Current AQI: {current_aqi}
-
-        Current pollutant levels:
-        - PM2.5: {pm25}
-        - PM10: {pm10}
-        - NO2: {no2}
-        - CO: {co}
-        - O3: {o3}
-
-        Estimate the likely impact of the policy.
-
-        Return only valid JSON:
-        {{
-          "effects_of_policy": ["Effect 1", "Effect 2", "Effect 3"],
-          "old_aqi": {current_aqi},
-          "new_aqi": 0,
-          "aqi_improvement_percent": 0,
-          "health_benefits": "low or high",
-          "timeline_months": 0
-        }}
-        """
-
-            return ask_gemini(prompt)
+            Readings are ug/m3. Prompting, validation and the single retry live
+            in app/services/policy_impact.py.
+            """
+            request = PredictPolicyRequest(
+                policy=policy, location=location,
+                pm25=pm25, pm10=pm10, no2=no2, co=co, o3=o3,
+            )
+            return analyse_policy(request)
 
 response_service = ResponseService()
