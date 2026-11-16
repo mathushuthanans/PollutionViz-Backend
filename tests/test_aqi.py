@@ -71,3 +71,46 @@ def test_non_numeric_input_returns_none(bad):
         args[position] = bad
         assert aqi(*args) is None
     assert not math.isnan(aqi(10, 10, 10, 10, 10))
+
+
+# --- /get_location and /health_impact use this same function -----------------
+
+def test_response_service_has_no_second_aqi_calculator():
+    from app.services.response_service import ResponseService
+
+    assert not hasattr(ResponseService, "_calculate_aqi")
+
+
+def test_get_location_scores_a_gap_value_in_the_next_band(monkeypatch):
+    """PM2.5 = 12.05 is in a gap; /get_location used to report 0 for it."""
+    import app.services.response_service as rs
+
+    class Fake:
+        status_code = 200
+
+        def __init__(self, body):
+            self._body = body
+
+        def json(self):
+            return self._body
+
+    air = {
+        "list": [
+            {
+                "dt": 1_700_000_000,
+                "main": {"aqi": 1},
+                "components": {"pm2_5": 12.05, "pm10": 0, "no2": 0, "co": 0, "o3": 0},
+            }
+        ]
+    }
+
+    def fake_get(url, params=None, timeout=None):
+        if "limit" in params:  # reverse geocode
+            return Fake([])
+        if "units" in params:  # weather
+            return Fake({"main": {"temp": 20}, "weather": []})
+        return Fake(air)  # current and forecast air
+
+    monkeypatch.setattr(rs.requests, "get", fake_get)
+    result = rs.response_service._fetch_location(1.0, 2.0, {})
+    assert result["data"]["pollution"]["aqi"] == 51

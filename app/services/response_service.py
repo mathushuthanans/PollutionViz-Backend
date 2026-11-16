@@ -134,7 +134,7 @@ class ResponseService:
             o3 = float(components.get("o3", 0))
 
             # Keep your existing app AQI calculation instead of OpenWeather's 1–5 AQI.
-            aqi = self._calculate_aqi(pm25, pm10, no2, co, o3)
+            aqi = calc(pm25, pm10, no2, co, o3)
 
             # Convert OpenWeather's hourly forecast into your existing
             # [{"day": "YYYY-MM-DD", "avg": number}] trend format.
@@ -468,132 +468,6 @@ class ResponseService:
         else:
             raise RuntimeError(f"API Error {response.status_code}: {response.text}")
 
-
-    def _calculate_aqi(
-        self,
-        pm25: float | None,
-        pm10: float | None,
-        no2: float | None,
-        co: float | None,
-        o3: float | None,
-    ) -> int | None:
-        """
-        Calculate an approximate 0–500 AQI from OpenWeather concentrations.
-
-        OpenWeather returns all pollutant components in µg/m³.
-        AQI breakpoints for CO, NO2, and O3 require converted units.
-        """
-
-        # Make sure all pollutant values are available.
-        if (
-            pm25 is None
-            or pm10 is None
-            or no2 is None
-            or co is None
-            or o3 is None
-        ):
-            return None
-
-        # Explicitly convert to float so Pylance knows these are not None.
-        pm25_value = float(pm25)
-        pm10_value = float(pm10)
-        no2_value = float(no2)
-        co_value = float(co)
-        o3_value = float(o3)
-
-        def calculate_sub_index(
-            concentration: float,
-            breakpoints: list[tuple[float, float, int, int]],
-        ) -> float:
-            for low_c, high_c, low_i, high_i in breakpoints:
-                if low_c <= concentration <= high_c:
-                    return (
-                        (high_i - low_i)
-                        / (high_c - low_c)
-                        * (concentration - low_c)
-                        + low_i
-                    )
-
-            return 500.0 if concentration > breakpoints[-1][1] else 0.0
-
-        # PM2.5 and PM10 are already in µg/m³.
-        pm25_aqi = calculate_sub_index(
-            pm25_value,
-            [
-                (0.0, 12.0, 0, 50),
-                (12.1, 35.4, 51, 100),
-                (35.5, 55.4, 101, 150),
-                (55.5, 150.4, 151, 200),
-                (150.5, 250.4, 201, 300),
-                (250.5, 350.4, 301, 400),
-                (350.5, 500.4, 401, 500),
-            ],
-        )
-
-        pm10_aqi = calculate_sub_index(
-            pm10_value,
-            [
-                (0.0, 54.0, 0, 50),
-                (55.0, 154.0, 51, 100),
-                (155.0, 254.0, 101, 150),
-                (255.0, 354.0, 151, 200),
-                (355.0, 424.0, 201, 300),
-                (425.0, 504.0, 301, 400),
-                (505.0, 604.0, 401, 500),
-            ],
-        )
-
-        # OpenWeather µg/m³ → AQI breakpoint units.
-        no2_ppb = no2_value / 1.88
-        o3_ppb = o3_value / 1.96
-        co_ppm = co_value / 1145.0
-
-        no2_aqi = calculate_sub_index(
-            no2_ppb,
-            [
-                (0.0, 53.0, 0, 50),
-                (54.0, 100.0, 51, 100),
-                (101.0, 360.0, 101, 150),
-                (361.0, 649.0, 151, 200),
-                (650.0, 1249.0, 201, 300),
-                (1250.0, 1649.0, 301, 400),
-                (1650.0, 2049.0, 401, 500),
-            ],
-        )
-
-        o3_aqi = calculate_sub_index(
-            o3_ppb,
-            [
-                (0.0, 54.0, 0, 50),
-                (55.0, 70.0, 51, 100),
-                (71.0, 85.0, 101, 150),
-                (86.0, 105.0, 151, 200),
-                (106.0, 200.0, 201, 300),
-            ],
-        )
-
-        co_aqi = calculate_sub_index(
-            co_ppm,
-            [
-                (0.0, 4.4, 0, 50),
-                (4.5, 9.4, 51, 100),
-                (9.5, 12.4, 101, 150),
-                (12.5, 15.4, 151, 200),
-                (15.5, 30.4, 201, 300),
-                (30.5, 40.4, 301, 400),
-                (40.5, 50.4, 401, 500),
-            ],
-        )
-
-        return round(
-            max(
-                pm25_aqi,
-                pm10_aqi,
-                no2_aqi,
-                o3_aqi,
-                co_aqi,
-            )
-        )
 
     def _get_aqi_status(self, aqi):
         """Get AQI status string"""
@@ -1110,7 +984,7 @@ class ResponseService:
                 }
 
             # Calculate AQI
-            aqi = self._calculate_aqi(pm25, pm10, no2, co, o3)
+            aqi = calc(pm25, pm10, no2, co, o3)
             if aqi is None:
                 return {"error": "Failed to calculate AQI"}
 

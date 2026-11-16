@@ -63,7 +63,7 @@ _CO_BANDS: list[_Band] = [
 ]
 
 # ug/m3 -> the unit each table uses (same factors as
-# ResponseService._calculate_aqi).
+# the former ResponseService._calculate_aqi, now removed).
 _NO2_UGM3_PER_PPB = 1.88
 _O3_UGM3_PER_PPB = 1.96
 _CO_UGM3_PER_PPM = 1145.0
