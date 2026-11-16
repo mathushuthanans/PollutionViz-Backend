@@ -11,7 +11,18 @@ API_KEY_GEMINI: str = os.getenv("API_KEY_GEMINI", "")
 # Optional: when REDIS_URL is unset the cache falls back to in-process memory.
 REDIS_URL: str = os.getenv("REDIS_URL", "")
 CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "600"))
+# Per-request timeout for each Gemini call (optional; not a required variable).
+GEMINI_TIMEOUT_SECONDS: int = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "30"))
 MODEL: str = os.getenv("MODEL", "")
+# Optional comma-separated fallback models, tried in order when MODEL fails with
+# a quota (429), server (5xx), timeout, connection, or model-not-found error.
+MODEL_FALLBACKS: list[str] = [
+    m.strip() for m in os.getenv("MODEL_FALLBACKS", "").split(",") if m.strip()
+]
+# How long a model that hit its quota (429) is skipped before it is retried.
+MODEL_COOLDOWN_SECONDS: int = int(os.getenv("MODEL_COOLDOWN_SECONDS", "300"))
+# Upper bound on one ask_gemini() call across all models it tries.
+GEMINI_TOTAL_BUDGET_SECONDS: int = int(os.getenv("GEMINI_TOTAL_BUDGET_SECONDS", "40"))
 OPENWEATHER_API_KEY: str = os.getenv("OPENWEATHER_API_KEY", "")
 OPENWEATHER_CURRENT_AIR_URL: str = os.getenv("OPENWEATHER_CURRENT_AIR_URL", "")
 OPENWEATHER_FORECAST_AIR_URL: str = os.getenv("OPENWEATHER_FORECAST_AIR_URL", "")
