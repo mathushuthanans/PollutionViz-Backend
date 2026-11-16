@@ -1,7 +1,10 @@
-from typing import Annotated
+import hashlib
+import json
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse
+from app.config import CACHE_TTL_SECONDS
 from app.models.datamodel1 import HealthRiskRequest, RegionClassRequest
 from app.models.datamodel1 import (
     PolicyAnalysisResponse, PolicyErrorBody,
@@ -19,6 +22,28 @@ from app.services import cache
 
 router = APIRouter()
 
+# Clients may reuse a read-only air-quality answer for this long without asking.
+_CLIENT_MAX_AGE = min(CACHE_TTL_SECONDS, 300)
+
+
+def _cacheable_json(request: Request, payload: Any) -> Response:
+    """JSON with Cache-Control + ETag; answers 304 when the client already has it.
+
+    Error payloads are sent with `no-store` so a failure is never reused.
+    """
+    body = json.dumps(payload, sort_keys=True, default=str).encode()
+    if isinstance(payload, dict) and "error" in payload:
+        return Response(body, media_type="application/json",
+                        headers={"Cache-Control": "no-store"})
+    etag = '"' + hashlib.sha1(body, usedforsecurity=False).hexdigest() + '"'
+    headers = {
+        "Cache-Control": f"public, max-age={_CLIENT_MAX_AGE}",
+        "ETag": etag,
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(body, media_type="application/json", headers=headers)
+
 
 
 @router.get("/cache_status")
@@ -30,17 +55,18 @@ def cache_status():
 
 # Done
 @router.get("/get_location")
-def get_location(lat: float, lon: float):
-    return response_service.get_location(lat, lon)
+def get_location(request: Request, lat: float, lon: float):
+    return _cacheable_json(request, response_service.get_location(lat, lon))
 
 
 @router.get("/get_trends")
 def get_trends(
+    request: Request,
     lat: float,
     lon: float,
     range: str = "weekly",
 ):
-    return response_service.get_trends(lat, lon, range)
+    return _cacheable_json(request, response_service.get_trends(lat, lon, range))
 
 
 @router.get("/get_scenario_presets")
