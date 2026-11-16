@@ -148,6 +148,31 @@ class MeasuredConditions(BaseModel):
     aqi: int = Field(ge=0, le=500)
     pollutants: PollutantReadings
     units: Literal["ug/m3"] = "ug/m3"
+    # Filled by the server after the model reply is validated.
+    respiratory: "RespiratoryImpact | None" = None
+
+
+class RespiratoryImpact(BaseModel):
+    """Server-derived from published coefficients (app/services/health_impact.py).
+    Not model-generated. Negative ``fewer_...`` means more cases (worse policy)."""
+
+    outcome: str
+    current_pm25: float
+    new_pm25: float
+    baseline_prevalence_percent: float
+    baseline_basis: Literal["state", "national"]
+    new_prevalence_percent: float
+    fewer_respiratory_cases_per_100k_under5: float
+    direction: Literal["reduction", "increase", "no_change"]
+    odds_ratio_per_10_ug_m3: float
+    coefficient_source_url: str
+    coefficient_source_year: int
+    baseline_source_url: str
+    baseline_source: str
+    coefficient_caveat: str
+
+
+MeasuredConditions.model_rebuild()
 
 
 UNSOURCED_HEALTH_FIELDS = (
@@ -174,7 +199,6 @@ class EstimatedImpact(BaseModel):
     long_term_steps: _Steps
     new_pollutants: PollutantReadings
     total_benefited: int = Field(ge=0)
-    respiratory_cases_reduction_percent: _Percent
     # Ungrounded model output, gated by config.SHOW_UNSOURCED_HEALTH_OUTPUTS.
     # Absent (not null) in the response unless the flag is on; when present,
     # each value carries a matching `<name>_unsourced: true`.

@@ -34,7 +34,6 @@ VALID_ESTIMATE = {
     "long_term_steps": ["Plant green belt"],
     "new_pollutants": {"pm25": 30, "pm10": 60, "no2": 20, "o3": 40, "co": 500},
     "total_benefited": 36_000_000,
-    "respiratory_cases_reduction_percent": 18,
     "healthcare_savings_crore_per_year": 120,
     "quality_of_life_increase_percent": 12,
     "life_expectancy_gain_years": 1.2,

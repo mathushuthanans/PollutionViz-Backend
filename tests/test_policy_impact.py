@@ -156,7 +156,6 @@ RULE_CASES = [
     ("new_pollutants", {"pm25": 1, "pm10": 1, "no2": 1, "o3": 1}),
     ("new_pollutants", {"pm25": -1, "pm10": 1, "no2": 1, "o3": 1, "co": 1}),
     ("total_benefited", -1),
-    ("respiratory_cases_reduction_percent", 101),
 ]
 
 

@@ -30,7 +30,7 @@ def test_default_config_omits_the_three_fields_entirely(
     dumped = result.model_dump()["estimated"]
     for key in (*UNSOURCED_HEALTH_FIELDS, *FLAGS):
         assert key not in dumped  # absent, not null
-    assert "respiratory_cases_reduction_percent" in dumped  # others untouched
+    assert "respiratory_cases_reduction_percent" not in dumped  # now server-derived
     assert ask.calls == 1
 
 

@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from app import config as app_config
 from app.data.state_population import get_state_population
+from app.services.health_impact import respiratory_impact
 from app.errors import UnknownStateError  # noqa: F401  (re-exported for callers)
 from app.models.datamodel1 import (
     UNSOURCED_HEALTH_FIELDS,
@@ -57,7 +58,12 @@ class PolicyModelError(Exception):
 
 
 # Keys the model may still send out of habit. They are dropped, never trusted.
-_POPULATION_KEYS = ("total_population", "urban_percent", "rural_percent")
+_POPULATION_KEYS = (
+    "total_population",
+    "urban_percent",
+    "rural_percent",
+    "respiratory_cases_reduction_percent",  # now server-derived, never trusted
+)
 
 
 def _prompt_schema(include_unsourced: bool) -> dict:
@@ -252,6 +258,11 @@ def analyse_policy(
                     reply_for_log = _reply_excerpt(reply)
                     retry_errors = errors
                 else:
+                    # Server-derived (not model-generated). The other three
+                    # health outputs stay model-generated; out of scope here.
+                    measured.respiratory = respiratory_impact(
+                        table["state"], request.pm25, estimated.new_pollutants.pm25
+                    )
                     return PolicyAnalysisResponse(
                         measured=measured, estimated=estimated
                     )
