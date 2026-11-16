@@ -24,8 +24,8 @@ import pytest
 
 VALID_ESTIMATE = {
     "effects_of_policy": ["Fewer diesel buses", "Lower NO2", "Less PM2.5"],
-    "new_aqi": 100,
-    "aqi_improvement_percent": 33.3,
+    "new_aqi": 83,
+    "aqi_improvement_percent": 33.6,
     "health_benefits": "high",
     "timeline_months": 24,
     "estimated_cost_crore": 450,

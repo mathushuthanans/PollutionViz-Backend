@@ -20,6 +20,12 @@ MODEL: str = os.getenv("MODEL", "")
 SHOW_UNSOURCED_HEALTH_OUTPUTS: bool = os.getenv(
     "SHOW_UNSOURCED_HEALTH_OUTPUTS", ""
 ).strip().lower() in ("1", "true", "yes")
+# /predict_policy: the model's claimed aqi_improvement_percent must be within
+# this many percentage points of the improvement implied by the server's current
+# AQI and the model's new_aqi, or the reply is rejected and retried once.
+AQI_IMPROVEMENT_TOLERANCE_PCT: float = float(
+    os.getenv("AQI_IMPROVEMENT_TOLERANCE_PCT", "10")
+)
 # Optional comma-separated fallback models, tried in order when MODEL fails with
 # a quota (429), server (5xx), timeout, connection, or model-not-found error.
 MODEL_FALLBACKS: list[str] = [

@@ -250,6 +250,9 @@ class PolicyAnalysisResponse(BaseModel):
 
 class PolicyErrorBody(BaseModel):
     error_class: Literal[
-        "model_unavailable", "model_reply_not_json", "model_reply_invalid"
+        "model_unavailable",
+        "model_reply_not_json",
+        "model_reply_invalid",
+        "model_reply_inconsistent",
     ]
     detail: str

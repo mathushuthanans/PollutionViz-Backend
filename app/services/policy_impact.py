@@ -147,6 +147,27 @@ def _clean_reply(reply: dict, show_unsourced: bool) -> dict:
     return out
 
 
+def check_aqi_consistency(
+    current_aqi: float, estimated: EstimatedImpact, tolerance_pct: float
+) -> str | None:
+    """Mismatch message for the retry prompt, or None if the reply is consistent.
+
+    Compares the model's claimed improvement with the one implied by the
+    server's current AQI and the model's new AQI (percentage-point tolerance).
+    """
+    if current_aqi <= 0:  # implied percent is undefined; nothing to compare
+        return None
+    implied = (current_aqi - estimated.new_aqi) / current_aqi * 100
+    claimed = estimated.aqi_improvement_percent
+    if abs(claimed - implied) <= tolerance_pct:
+        return None
+    return (
+        f"you claimed {claimed:.1f}% AQI improvement but the AQI numbers imply "
+        f"{implied:.1f}% (current AQI {current_aqi} to new_aqi "
+        f"{estimated.new_aqi:g}); reconcile or correct"
+    )
+
+
 def build_retry_prompt(prompt: str, errors: list[str]) -> str:
     """The original prompt plus why the last reply was rejected.
 
@@ -258,14 +279,25 @@ def analyse_policy(
                     reply_for_log = _reply_excerpt(reply)
                     retry_errors = errors
                 else:
-                    # Server-derived (not model-generated). The other three
-                    # health outputs stay model-generated; out of scope here.
-                    measured.respiratory = respiratory_impact(
-                        table["state"], request.pm25, estimated.new_pollutants.pm25
+                    mismatch = check_aqi_consistency(
+                        aqi, estimated, app_config.AQI_IMPROVEMENT_TOLERANCE_PCT
                     )
-                    return PolicyAnalysisResponse(
-                        measured=measured, estimated=estimated
-                    )
+                    if mismatch is None:
+                        # Server-derived (not model-generated). The other three
+                        # health outputs stay model-generated; out of scope here.
+                        measured.respiratory = respiratory_impact(
+                            table["state"], request.pm25, estimated.new_pollutants.pm25
+                        )
+                        return PolicyAnalysisResponse(
+                            measured=measured, estimated=estimated
+                        )
+                    # Treated like a schema failure: same retry-once flow, with
+                    # the mismatch named in the retry prompt. The raw reply goes
+                    # to the log only; the client gets just the mismatch message.
+                    error_class = "model_reply_inconsistent"
+                    errors = [mismatch]
+                    reply_for_log = _reply_excerpt(reply)
+                    retry_errors = errors
 
         logger.warning(
             "predict_policy attempt %d failed: %s; reply: %s",
