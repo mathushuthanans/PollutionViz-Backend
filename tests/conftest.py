@@ -130,3 +130,11 @@ def block_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _blocked)
     monkeypatch.setattr(socket.socket, "connect_ex", _blocked)
     monkeypatch.setattr(socket, "getaddrinfo", _blocked)
+
+
+@pytest.fixture
+def unsourced_on(monkeypatch):
+    """Turn SHOW_UNSOURCED_HEALTH_OUTPUTS on for one test (default is off)."""
+    import app.config
+
+    monkeypatch.setattr(app.config, "SHOW_UNSOURCED_HEALTH_OUTPUTS", True)

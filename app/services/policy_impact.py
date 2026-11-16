@@ -1,5 +1,7 @@
 """Policy impact analysis for /predict_policy.
 
+NOTE: healthcare savings, quality-of-life gain and life-expectancy gain remain ungrounded model output and are disabled by default (config.SHOW_UNSOURCED_HEALTH_OUTPUTS).
+
 Asks Gemini for the estimated impact of a policy, validates the reply against
 ``EstimatedImpact``, retries once with the validation errors if it fails, and
 raises ``PolicyModelError`` if the second attempt also fails.
@@ -14,9 +16,11 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
+from app import config as app_config
 from app.data.state_population import get_state_population
 from app.errors import UnknownStateError  # noqa: F401  (re-exported for callers)
 from app.models.datamodel1 import (
+    UNSOURCED_HEALTH_FIELDS,
     EstimatedImpact,
     MeasuredConditions,
     PopulationFacts,
@@ -56,13 +60,48 @@ class PolicyModelError(Exception):
 _POPULATION_KEYS = ("total_population", "urban_percent", "rural_percent")
 
 
-def build_prompt(request: PredictPolicyRequest, aqi: int, population: dict) -> str:
+def _prompt_schema(include_unsourced: bool) -> dict:
+    """EstimatedImpact's JSON Schema as the model should see it.
+
+    The ``*_unsourced`` flags are server-set, so they are never shown. The three
+    ungrounded health fields are shown (and required) only when
+    ``include_unsourced`` is true.
+    """
+    schema = EstimatedImpact.model_json_schema()
+    props = schema["properties"]
+    required = schema["required"]
+    for name in UNSOURCED_HEALTH_FIELDS:
+        props.pop(f"{name}_unsourced", None)
+        if include_unsourced:
+            # Optional in the model, but required of the model when shown.
+            branches = [b for b in props[name].get("anyOf", []) if b.get("type") != "null"]
+            props[name] = {**props[name], **(branches[0] if branches else {})}
+            props[name].pop("anyOf", None)
+            props[name].pop("default", None)
+            required.append(name)
+        else:
+            props.pop(name, None)
+    return schema
+
+
+def build_prompt(
+    request: PredictPolicyRequest,
+    aqi: int,
+    population: dict,
+    include_unsourced: bool = False,
+) -> str:
     """Prompt for the first attempt.
 
     The schema is generated from ``EstimatedImpact`` so the prompt and the
     validator cannot drift apart.
     """
-    schema = json.dumps(EstimatedImpact.model_json_schema(), indent=1)
+    schema = json.dumps(_prompt_schema(include_unsourced), indent=1)
+    unsourced_units = (
+        "healthcare_savings_crore_per_year is rupees crore per year;\n"
+        "life_expectancy_gain_years is years; "
+        if include_unsourced
+        else ""
+    )
     return f"""Estimate the likely impact of this pollution policy.
 
 Policy: {request.policy}
@@ -80,13 +119,26 @@ Current pollutant levels (ug/m3):
 
 Return one JSON object that matches this JSON Schema exactly. Every field is
 required. Units: estimated_cost_crore is rupees crore;
-healthcare_savings_crore_per_year is rupees crore per year;
-life_expectancy_gain_years is years; new_pollutants are ug/m3 after the policy;
+{unsourced_units}new_pollutants are ug/m3 after the policy;
 total_benefited is a head count of people in {request.location} who benefit and
 must not exceed the fixed population above.
 
 {schema}
 """
+
+
+def _clean_reply(reply: dict, show_unsourced: bool) -> dict:
+    """Drop what the server owns; mark what the server does not trust."""
+    drop = set(_POPULATION_KEYS)
+    drop.update(f"{n}_unsourced" for n in UNSOURCED_HEALTH_FIELDS)  # server-set
+    if not show_unsourced:
+        drop.update(UNSOURCED_HEALTH_FIELDS)
+    out = {k: v for k, v in reply.items() if k not in drop}
+    if show_unsourced:
+        for name in UNSOURCED_HEALTH_FIELDS:
+            if out.get(name) is not None:
+                out[f"{name}_unsourced"] = True
+    return out
 
 
 def build_retry_prompt(prompt: str, errors: list[str]) -> str:
@@ -161,7 +213,8 @@ def analyse_policy(
         ),
     )
 
-    first_prompt = build_prompt(request, aqi, table)
+    show_unsourced = app_config.SHOW_UNSOURCED_HEALTH_OUTPUTS
+    first_prompt = build_prompt(request, aqi, table, show_unsourced)
     prompt = first_prompt
     error_class = "model_reply_invalid"
     errors: list[str] = []
@@ -185,12 +238,13 @@ def analyse_policy(
                 try:
                     if isinstance(reply, dict):
                         # The model's population numbers are discarded.
-                        reply = {
-                            k: v for k, v in reply.items() if k not in _POPULATION_KEYS
-                        }
+                        reply = _clean_reply(reply, show_unsourced)
                     estimated = EstimatedImpact.model_validate(
                         reply,
-                        context={"total_population": population.total_population},
+                        context={
+                            "total_population": population.total_population,
+                            "require_unsourced": show_unsourced,
+                        },
                     )
                 except ValidationError as exc:
                     error_class = "model_reply_invalid"

@@ -14,6 +14,12 @@ CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "600"))
 # Per-request timeout for each Gemini call (optional; not a required variable).
 GEMINI_TIMEOUT_SECONDS: int = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "30"))
 MODEL: str = os.getenv("MODEL", "")
+# Dev/demo only. healthcare_savings_crore_per_year, quality_of_life_increase_percent
+# and life_expectancy_gain_years are invented by the model with no source. While
+# this is False (the default) they are not requested and never sent to clients.
+SHOW_UNSOURCED_HEALTH_OUTPUTS: bool = os.getenv(
+    "SHOW_UNSOURCED_HEALTH_OUTPUTS", ""
+).strip().lower() in ("1", "true", "yes")
 # Optional comma-separated fallback models, tried in order when MODEL fails with
 # a quota (429), server (5xx), timeout, connection, or model-not-found error.
 MODEL_FALLBACKS: list[str] = [

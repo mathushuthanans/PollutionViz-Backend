@@ -1,9 +1,11 @@
 from pydantic import (
     BaseModel,
     Field,
+    SerializerFunctionWrapHandler,
     ValidationInfo,
     StringConstraints,
     field_validator,
+    model_serializer,
     model_validator,
 )
 from typing import Annotated, Any, Literal, TypedDict, cast
@@ -148,6 +150,13 @@ class MeasuredConditions(BaseModel):
     units: Literal["ug/m3"] = "ug/m3"
 
 
+UNSOURCED_HEALTH_FIELDS = (
+    "healthcare_savings_crore_per_year",
+    "quality_of_life_increase_percent",
+    "life_expectancy_gain_years",
+)
+
+
 class EstimatedImpact(BaseModel):
     """Everything the model produced. Every field is required.
 
@@ -166,9 +175,17 @@ class EstimatedImpact(BaseModel):
     new_pollutants: PollutantReadings
     total_benefited: int = Field(ge=0)
     respiratory_cases_reduction_percent: _Percent
-    healthcare_savings_crore_per_year: float = Field(ge=0, le=100_000)
-    quality_of_life_increase_percent: _Percent
-    life_expectancy_gain_years: float = Field(ge=0, le=10)
+    # Ungrounded model output, gated by config.SHOW_UNSOURCED_HEALTH_OUTPUTS.
+    # Absent (not null) in the response unless the flag is on; when present,
+    # each value carries a matching `<name>_unsourced: true`.
+    healthcare_savings_crore_per_year: float | None = Field(
+        default=None, ge=0, le=100_000
+    )
+    healthcare_savings_crore_per_year_unsourced: Literal[True] | None = None
+    quality_of_life_increase_percent: _Percent | None = None
+    quality_of_life_increase_percent_unsourced: Literal[True] | None = None
+    life_expectancy_gain_years: float | None = Field(default=None, ge=0, le=10)
+    life_expectancy_gain_years_unsourced: Literal[True] | None = None
 
     @field_validator("health_benefits", mode="before")
     @classmethod
@@ -179,10 +196,27 @@ class EstimatedImpact(BaseModel):
     def _cross_field_rules(self, info: ValidationInfo) -> "EstimatedImpact":
         # Population is server-known, so it arrives as validation context
         # ({"total_population": int}) rather than as a model-supplied field.
-        population = (info.context or {}).get("total_population")
+        context = info.context or {}
+        population = context.get("total_population")
         if population is not None and self.total_benefited > population:
             raise ValueError("total_benefited must not exceed total_population")
+        for name in UNSOURCED_HEALTH_FIELDS:
+            value = getattr(self, name)
+            flag = getattr(self, f"{name}_unsourced")
+            if value is None and context.get("require_unsourced"):
+                raise ValueError(f"{name} is required when unsourced outputs are on")
+            if (value is None) != (flag is None):
+                raise ValueError(f"{name} and {name}_unsourced must appear together")
         return self
+
+    @model_serializer(mode="wrap")
+    def _omit_gated_fields(self, handler: SerializerFunctionWrapHandler) -> dict:
+        data = handler(self)
+        for name in UNSOURCED_HEALTH_FIELDS:
+            for key in (name, f"{name}_unsourced"):
+                if data.get(key) is None:
+                    data.pop(key, None)  # absent, never null
+        return data
 
 
 class PolicyAnalysisResponse(BaseModel):

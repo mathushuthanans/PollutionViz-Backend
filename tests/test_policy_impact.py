@@ -157,6 +157,10 @@ RULE_CASES = [
     ("new_pollutants", {"pm25": -1, "pm10": 1, "no2": 1, "o3": 1, "co": 1}),
     ("total_benefited", -1),
     ("respiratory_cases_reduction_percent", 101),
+]
+
+
+GATED_RULE_CASES = [
     ("healthcare_savings_crore_per_year", -1),
     ("healthcare_savings_crore_per_year", 100_001),
     ("quality_of_life_increase_percent", 101),
@@ -169,6 +173,17 @@ RULE_CASES = [
 @pytest.mark.parametrize("field, value", RULE_CASES)
 def test_each_field_rule_rejects_a_bad_value(
     request_obj, valid_estimate, fake_ask, field, value
+):
+    bad = _mutate(valid_estimate, **{field: value})
+    with pytest.raises(PolicyModelError) as caught:
+        analyse_policy(request_obj, ask=fake_ask(bad, bad))
+    assert caught.value.error_class == "model_reply_invalid"
+    assert field in caught.value.detail
+
+
+@pytest.mark.parametrize("field, value", GATED_RULE_CASES)
+def test_each_gated_field_rule_rejects_a_bad_value_when_the_flag_is_on(
+    unsourced_on, request_obj, valid_estimate, fake_ask, field, value
 ):
     bad = _mutate(valid_estimate, **{field: value})
     with pytest.raises(PolicyModelError) as caught:
